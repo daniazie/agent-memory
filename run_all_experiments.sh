@@ -12,17 +12,17 @@
 # =============================================================================
 set -euo pipefail
 
-WORKDIR="/common/users/wx139/code/opensource_all/A-mem_opensource"
-AMEM_PYTHON="/common/users/wx139/env/amem_env/bin/python3"
-VLLM_PYTHON="/common/users/wx139/env/verl-agent-alfworld/bin/python"
+WORKDIR=$(pwd)
+AMEM_PYTHON="python"
+VLLM_PYTHON="python"
 DATASET="data/locomo10.json"
 
 PORT_A=30000
 PORT_B=30001
-TP_3B=1
-TP_1B=1
-GPUS_3B="0"
-GPUS_1B="1"
+# TP_3B=1
+# TP_1B=1
+# GPUS_3B="0"
+# GPUS_1B="1"
 
 HEALTH_TIMEOUT=300
 HEALTH_INTERVAL=5
@@ -65,16 +65,14 @@ wait_for_server() {
 }
 
 launch_vllm() {
-    local model=$1 port=$2 tp=$3 gpus=$4 logfile=$5
-    log "Launching vLLM: model=$model tp=$tp port=$port gpus=$gpus"
-    CUDA_VISIBLE_DEVICES=$gpus \
+    local model=$1 port=$2 logfile=$3
+    log "Launching vLLM: model=$model port=$port"
     VLLM_USE_V1=0 \
     VLLM_ATTENTION_BACKEND=XFORMERS \
         $VLLM_PYTHON -m vllm.entrypoints.openai.api_server \
         --model "$model" \
         --port "$port" \
         --host 0.0.0.0 \
-        --tensor-parallel-size "$tp" \
         --trust-remote-code \
         --dtype float16 \
         --enforce-eager \
@@ -85,9 +83,8 @@ launch_vllm() {
 }
 
 run_eval() {
-    local backend=$1 model=$2 output=$3 port=${4:-30000} gpu=${5:-7}
+    local backend=$1 model=$2 output=$3 port=${4:-30000}
     log "Starting eval: backend=$backend model=$model output=$output gpu=$gpu"
-    CUDA_VISIBLE_DEVICES=$gpu \
     $AMEM_PYTHON test_advanced_robust.py \
         --backend "$backend" \
         --model "$model" \
@@ -114,10 +111,10 @@ log "=== Step 1: OpenAI models (gpt-4o-mini, gpt-4o, gpt-4) ==="
 ( run_eval openai gpt-4o-mini results_robust_gpt-4o-mini.json 30000 5 ) &
 PID_GPT4O_MINI=$!
 
-( run_eval openai gpt-4o results_robust_gpt-4o.json 30000 6 ) &
+( run_eval openai gpt-4o results_robust_gpt-4o.json 30000 5 ) &
 PID_GPT4O=$!
 
-( run_eval openai gpt-4 results_robust_gpt-4.json 30000 7 ) &
+( run_eval openai gpt-4 results_robust_gpt-4.json 30000 5 ) &
 PID_GPT4=$!
 
 log "OpenAI evals backgrounded: gpt-4o-mini=$PID_GPT4O_MINI, gpt-4o=$PID_GPT4O, gpt-4=$PID_GPT4"
@@ -128,11 +125,11 @@ log "OpenAI evals backgrounded: gpt-4o-mini=$PID_GPT4O_MINI, gpt-4o=$PID_GPT4O, 
 log "=== Step 2: Llama models ==="
 
 PID_VLLM_LLAMA3B=$(launch_vllm \
-    "meta-llama/Llama-3.2-3B-Instruct" $PORT_A $TP_3B "$GPUS_3B" \
+    "meta-llama/Llama-3.2-3B-Instruct" $PORT_A \
     "logs/vllm_llama3.2-3b.log")
 
 PID_VLLM_LLAMA1B=$(launch_vllm \
-    "meta-llama/Llama-3.2-1B-Instruct" $PORT_B $TP_1B "$GPUS_1B" \
+    "meta-llama/Llama-3.2-1B-Instruct" $PORT_B \
     "logs/vllm_llama3.2-1b.log")
 
 log "vLLM servers launching: Llama-3B=$PID_VLLM_LLAMA3B, Llama-1B=$PID_VLLM_LLAMA1B"
@@ -165,11 +162,11 @@ sleep 3
 log "=== Step 3: Qwen models ==="
 
 PID_VLLM_QWEN3B=$(launch_vllm \
-    "Qwen/Qwen2.5-3B-Instruct" $PORT_A $TP_3B "$GPUS_3B" \
+    "Qwen/Qwen2.5-3B-Instruct" $PORT_A \
     "logs/vllm_qwen2.5-3b.log")
 
 PID_VLLM_QWEN1_5B=$(launch_vllm \
-    "Qwen/Qwen2.5-1.5B-Instruct" $PORT_B $TP_1B "$GPUS_1B" \
+    "Qwen/Qwen2.5-1.5B-Instruct" $PORT_B \
     "logs/vllm_qwen2.5-1.5b.log")
 
 log "vLLM servers launching: Qwen-3B=$PID_VLLM_QWEN3B, Qwen-1.5B=$PID_VLLM_QWEN1_5B"

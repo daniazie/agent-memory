@@ -4,9 +4,9 @@ set -euo pipefail
 # K-sweep: find optimal retrieval k for each model using cached memories.
 # Memories are already built — this only re-runs the QA answering step.
 
-AMEM_PYTHON="/common/users/wx139/env/amem_env/bin/python3"
-VLLM_PYTHON="/common/users/wx139/env/verl-agent-alfworld/bin/python"
-WORKDIR="/common/users/wx139/code/opensource_all/A-mem_opensource"
+AMEM_PYTHON="python"
+VLLM_PYTHON="python"
+WORKDIR=$(pwd)
 DATASET="data/locomo10.json"
 
 K_VALUES=(10 15 20 25 30 35 40 45 50)
@@ -85,14 +85,14 @@ run_k_sweep_for_model() {
 log "=== Phase 1: Llama models k-sweep ==="
 
 # Launch Llama servers on GPUs 0,1
-PID_LLAMA3B=$(launch_vllm "meta-llama/Llama-3.2-3B-Instruct" 30000 0 "logs/ksweep_vllm_llama3b.log")
-PID_LLAMA1B=$(launch_vllm "meta-llama/Llama-3.2-1B-Instruct" 30001 1 "logs/ksweep_vllm_llama1b.log")
+PID_LLAMA3B=$(launch_vllm "meta-llama/Llama-3.2-3B-Instruct" 30000 5 "logs/ksweep_vllm_llama3b.log")
+PID_LLAMA1B=$(launch_vllm "meta-llama/Llama-3.2-1B-Instruct" 30001 5 "logs/ksweep_vllm_llama1b.log")
 
 if wait_for_server 30000 "Llama-3B" && wait_for_server 30001 "Llama-1B"; then
     # Run sweeps in parallel (eval on GPUs 2,3)
-    run_k_sweep_for_model vllm "meta-llama/Llama-3.2-3B-Instruct" 30000 2 &
+    run_k_sweep_for_model vllm "meta-llama/Llama-3.2-3B-Instruct" 30000 5 &
     PID_SWEEP_LLAMA3B=$!
-    run_k_sweep_for_model vllm "meta-llama/Llama-3.2-1B-Instruct" 30001 3 &
+    run_k_sweep_for_model vllm "meta-llama/Llama-3.2-1B-Instruct" 30001 5 &
     PID_SWEEP_LLAMA1B=$!
     wait $PID_SWEEP_LLAMA3B || log "WARNING: Llama-3B sweep failed"
     wait $PID_SWEEP_LLAMA1B || log "WARNING: Llama-1B sweep failed"
@@ -111,13 +111,13 @@ sleep 5
 # =============================================================================
 log "=== Phase 2: Qwen models k-sweep ==="
 
-PID_QWEN3B=$(launch_vllm "Qwen/Qwen2.5-3B-Instruct" 30000 0 "logs/ksweep_vllm_qwen3b.log")
-PID_QWEN15B=$(launch_vllm "Qwen/Qwen2.5-1.5B-Instruct" 30001 1 "logs/ksweep_vllm_qwen15b.log")
+PID_QWEN3B=$(launch_vllm "Qwen/Qwen2.5-3B-Instruct" 30000 5 "logs/ksweep_vllm_qwen3b.log")
+PID_QWEN15B=$(launch_vllm "Qwen/Qwen2.5-1.5B-Instruct" 30001 5 "logs/ksweep_vllm_qwen15b.log")
 
 if wait_for_server 30000 "Qwen-3B" && wait_for_server 30001 "Qwen-1.5B"; then
-    run_k_sweep_for_model vllm "Qwen/Qwen2.5-3B-Instruct" 30000 2 &
+    run_k_sweep_for_model vllm "Qwen/Qwen2.5-3B-Instruct" 30000 5 &
     PID_SWEEP_QWEN3B=$!
-    run_k_sweep_for_model vllm "Qwen/Qwen2.5-1.5B-Instruct" 30001 3 &
+    run_k_sweep_for_model vllm "Qwen/Qwen2.5-1.5B-Instruct" 30001 5 &
     PID_SWEEP_QWEN15B=$!
     wait $PID_SWEEP_QWEN3B || log "WARNING: Qwen-3B sweep failed"
     wait $PID_SWEEP_QWEN15B || log "WARNING: Qwen-1.5B sweep failed"

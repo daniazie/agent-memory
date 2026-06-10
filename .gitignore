@@ -1,0 +1,6 @@
+.env
+__pycache__
+logs
+hub
+cached_*
+xet
