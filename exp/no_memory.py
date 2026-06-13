@@ -28,6 +28,7 @@ def init_parser():
     parser.add_argument('--enable_thinking', action='store_true', default=False)
     parser.add_argument('--category', type=choice_type, default='all')
     parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--max_tokens', type=int, default=32)
     parser.add_argument('--output_dir', type=str, default='results')
     return parser
 
@@ -64,7 +65,7 @@ def decode_thinking(model: LLM, outputs_ids: list):
     for reasoning, answer in zip(reasoning_outputs, answers):
         pred = {
             "reasoning": reasoning,
-            "answer": answer
+            "answer": answer.strip()
         }
         preds.append(pred)
     return preds
@@ -75,9 +76,9 @@ def main(args: argparse.Namespace):
 
     sampling_params = model.get_default_sampling_params()
     sampling_params.n = 1
-    sampling_params.max_tokens = 512 if args.enable_thinking else 16
+    sampling_params.max_tokens = 256 if args.enable_thinking else args.max_tokens
     if args.enable_thinking:
-        sampling_params.thinking_token_budget = sampling_params.max_tokens - 16
+        sampling_params.thinking_token_budget = sampling_params.max_tokens - args.max_tokens
 
     prompts = dataset['prompt']
     requests = model.enqueue_chat(prompts, sampling_params=sampling_params, chat_template_kwargs={"enable_thinking": args.enable_thinking})

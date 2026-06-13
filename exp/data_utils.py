@@ -3,18 +3,43 @@ from datasets import Dataset, Value, concatenate_datasets, Json
 import random
 import json
 
-PROMPT = """Answer the question based on the following conversation(s).
+SYSTEM_PROMPT = """You are to answer a user query based on a series of conversations. 
+Express your answer in keywords ONLY. Do NOT write full and lengthy sentences.
+For example, given a scenario where Amy mentions her plan to pursue astrophysics in university:
+```
+Question: What does Amy plan to study in university?
 
-{conversation}
+[Examples of wrong format]
+Amy plans to study astrophysics in university.
+Amy wants to study astrophysics.
+Amy wants to pursue astrophysics in university.
+
+[Examples of correct format]
+Astrophysics
+astrophysics
+```
+Note that the timestamp (written in brackets ([]) before each conversation correspond to the time and date the conversation takes place.
+Use the timestamp(s) as a reference to approximate the answer when needed.
+For example, given a conversation that takes place on 4 May 2022, and Amber mentions watching a movie the previous day:
+```
+Question: When did Amber watch [MOVIE TITLE]?
+
+[Acceptable answers]
+3 May
+3 May 2022
+the day before 4 May 2022
+```
+
+Whenever possible, answer with exact words from the conversation(s). If you do not know the answer, do not share false information.
+""".strip()
+
+USER_PROMPT = """{conversation}
 
 Question: {question}
-
-Do not write lengthy or complete sentences; instead provide your answer using keywords. Whenever possible, answer with exact words from the conversation(s)..
-If the answer cannot be found or inferred, do not share false information.
 """
 
 def format_session(session, timestamp):
-    session_conv = f"TIMESTAMP: {timestamp}\nCONVERSATION:\n"
+    session_conv = f"[{timestamp}]\n"
     for dialogue in session:
         utterance = ""
         if dialogue.get("blip_caption") is not None:
@@ -97,8 +122,6 @@ def format_dataset(examples, category='all'):
         dialogue.append(qa['dialogue'])
         questions.append(query)
 
-        if qa['category'] == 2:
-            query += " Use the timestamps as a reference to approximate the answer when needed."
         if qa['category'] == 5:
             choices = "\nChoose the correct answer:\n(a) {}\n(b){}"
             if random.random() < 0.5:
@@ -111,9 +134,10 @@ def format_dataset(examples, category='all'):
         else:
             answer = qa['answer']
 
-        prompt = PROMPT.format(conversation=context_conv, question=query)
+        user_prompt = USER_PROMPT.format(conversation=context_conv, question=query)
         prompt = [
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
         ]
         
         prompts.append(prompt)
