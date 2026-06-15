@@ -110,7 +110,7 @@ class MemoryNote:
 class AgenticMemorySystem:
     def __init__(self,
                  model_name: str | LLMController = 'all-MiniLM-L6-v2',
-                 llm: str | LLMControllerq = "Qwen/Qwen3-4B-Instruct-2507",
+                 llm: str | LLMController = "Qwen/Qwen3-4B-Instruct-2507",
                  evo_threshold: int = 100,
                  enable_thinking: bool = False,
                  **vllm_kwargs
