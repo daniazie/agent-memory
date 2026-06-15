@@ -98,23 +98,21 @@ def add_evidence(examples):
     examples['qa'] = qas
     return examples
 
-def format_dataset(examples, category='all'):
+def format_dataset(examples, use_mcq: bool = False):
     examples = add_evidence(remove_session(examples))
-    if category == 'all':
-        qas = examples['qa']
-        categories = []
-    else:
-        qas = [example for example in examples['qa'] if example['category'] == category]
-        categories = None
-
+    qas = examples['qa']
+    categories = []
     conversation = examples['conversation']
 
     questions = []
     prompts = []
     answers = []
     dialogue = []
+    references = []
+    timestamps = []
     for qa in qas:
-        if qa['category'] == 4:
+        category = qa['category']
+        if category == 4:
             context_conv = format_single_hop(qa['evidence'], conversation)
         else:
             context_conv = format_multihop(conversation)
@@ -122,17 +120,24 @@ def format_dataset(examples, category='all'):
         dialogue.append(qa['dialogue'])
         questions.append(query)
 
-        if qa['category'] == 5:
-            choices = "\nChoose the correct answer:\n(a) {}\n(b){}"
-            if random.random() < 0.5:
-                query += choices.format(qa['adversarial_answer'], "No information available")
-                answer = {'a': qa['adversarial_answer'], 'b': "No information available"}
-            else:
-                query += choices.format("No information available", qa['adversarial_answer'])
-                answer = {'a': "No information available", 'b': qa['adversarial_answer']}
+        if use_mcq:
+            if qa['category'] == 5:
+                choices = "\nChoose the correct answer:\n(a) {}\n(b){}"
+                if random.random() < 0.5:
+                    query += choices.format(qa['adversarial_answer'], "Not mentioned")
+                    answer = {"a": qa['adversarial_answer'], "b": "Not mentioned"}
+                else:
+                    query += choices.format("Not mentioned", qa['adversarial_answer'])
+                    answer = {"b": "Not mentioned", "b": qa['adversarial_answer']}
 
+            else:
+                answer = qa['answer']
         else:
-            answer = qa['answer']
+            answer = qa.get('answer') or qa.get('adversarial_answer')
+            answer = str(answer)
+
+        reference = str(qa.get('answer')) or "Not mentioned"
+        
 
         user_prompt = USER_PROMPT.format(conversation=context_conv, question=query)
         prompt = [
@@ -142,27 +147,25 @@ def format_dataset(examples, category='all'):
         
         prompts.append(prompt)
         answers.append(answer)
-        if categories is not None:
-            categories.append(qa['category'])
+        references.append(reference)
+        categories.append(qa['category'])
 
     dataset = {
         'question': questions,
         "prompt": prompts,
-        "answer": answers,
+        "reference": references,
+        'answer': answers,
+        'dialogue': dialogue,
+        'category': categories
     }
 
-    if not category == 5:
-        dataset['dialogue'] = dialogue
-
-    if categories is not None:
-        dataset['category'] = categories
     return dataset
 
-def load_dataset(data_path, category):
+def load_dataset(data_path, use_mcq: bool = False):
     data = json.load(open(data_path, "r"))
     datasets = []
     for sample in data:
-        dataset = Dataset.from_dict(format_dataset(sample, category=category), on_mixed_types='use_json')
+        dataset = Dataset.from_dict(format_dataset(sample, use_mcq=use_mcq), on_mixed_types='use_json')
         datasets.append(dataset)
 
     dataset: Dataset = concatenate_datasets(datasets)

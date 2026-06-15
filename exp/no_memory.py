@@ -11,22 +11,20 @@ import json
 import os
 
 from data_utils import load_dataset, prepare_dataset
+from a_mem.utils import calculate_metrics, aggregate_metrics
 
 class Answer(BaseModel):
     answer: str
     thinking_content: str
-
-def choice_type(choice: str):
-    if choice.isdigit():
-        return int(choice)
-    return choice
 
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default="Qwen/Qwen3-4B-Instruct-2507")
     parser.add_argument('--data_path', type=str, default='A-mem/data/locomo10.json')
     parser.add_argument('--enable_thinking', action='store_true', default=False)
-    parser.add_argument('--category', type=choice_type, default='all')
+    parser.add_argument('--thinking_token_budget', type=int, default=0)
+    parser.add_argument('--enable_thinking_budget', action='store_true', default=False)
+    parser.add_argument('--use_mcq', action='store_true', default=False)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--max_tokens', type=int, default=32)
     parser.add_argument('--output_dir', type=str, default='results')
@@ -71,14 +69,14 @@ def decode_thinking(model: LLM, outputs_ids: list):
     return preds
 
 def main(args: argparse.Namespace):
-    dataset = load_dataset(args.data_path, category=args.category)
+    dataset = load_dataset(args.data_path, args.use_mcq)
     model = load_model(args)
 
     sampling_params = model.get_default_sampling_params()
     sampling_params.n = 1
-    sampling_params.max_tokens = 256 if args.enable_thinking else args.max_tokens
-    if args.enable_thinking:
-        sampling_params.thinking_token_budget = sampling_params.max_tokens - args.max_tokens
+    sampling_params.max_tokens = args.thinking_token_budget + args.max_tokens
+    if args.enable_thinking_budget:
+        sampling_params.thinking_token_budget = args.thinking_token_budget
 
     prompts = dataset['prompt']
     requests = model.enqueue_chat(prompts, sampling_params=sampling_params, chat_template_kwargs={"enable_thinking": args.enable_thinking})
@@ -91,24 +89,54 @@ def main(args: argparse.Namespace):
         preds = [output.outputs[0].text for output in outputs]
 
     results = []
+    metrics = []
+    categories = []
+    final_results = {
+        "model": args.model.split('/')[-1],
+        "dataset": args.data_path,
+        "total_questions": dataset.num_rows,
+    }
+    per_sample_scores = []
     for pred, item in zip(preds, dataset):
         result = {
             k: v
             for k, v in item.items()
             if not k == 'prompt'
         }
+        scores = calculate_metrics(pred, item['reference'])
+        metrics.append(scores)
+        categories.append(item['category'])
         if args.enable_thinking:
             result['prediction'] = pred['answer']
             result['reasoning'] = pred['reasoning']
         else:
             result['prediction'] = pred
         results.append(result)
+
+        per_sample_scores.append({
+            "category": item['category'],
+            "question": item['question'],
+            "answer": item['answer'],
+            "reference": item['reference'],
+            "evidence": item['dialogue'],
+            "prediction": result.get("prediction"),
+            "scores": scores
+        })
+
+    aggregated = aggregate_metrics(metrics, categories)
+
+    final_results['aggregated_scores'] = aggregated
+    final_results['per_sample_scores'] = per_sample_scores
     
     os.makedirs(args.output_dir, exist_ok=True)
+    model_name = args.model.split('/')[-1].lower()
     if args.enable_thinking:
-        result_file = f"{args.model.split('/')[-1].lower()}_no-memory_{args.category}_results.json"
-    else:
-        result_file = f"{args.model.split('/')[-1].lower()}_no-memory_{args.category}_results.json"
+        if not 'think' in model_name.lower() or not 'reason' in model_name.lower():
+            model_name = f"{model_name}-reasoning"
+        if args.enable_thinking_budget:
+            model_name = f"{model_name}_budgeted"
+    
+    result_file = f"{model_name}_no-memory_results.json"
     with open(f"{args.output_dir}/{result_file}", "w", encoding="utf-8") as file:
         json.dump(results, file, indent=2)
 
