@@ -67,7 +67,7 @@ def setup_logger(log_file: Optional[str] = None) -> logging.Logger:
     return eval_logger
 
 
-def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, output_path: Optional[str] = None,
+def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batched_run: bool, output_path: Optional[str] = None,
                      ratio: float = 1.0,
                      temperature_c5: float = 0.5, retrieve_k: int = 10,
                      enable_thinking: bool = False, vllm_kwargs: dict | None = None):
@@ -106,7 +106,7 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, output
     allow_categories = [1, 2, 3, 4, 5]
 
     for sample_idx, sample in enumerate(samples):
-        agent = MemAgent(model, embedding_model, retrieve_k, temperature_c5, enable_thinking=enable_thinking, vllm_kwargs=vllm_kwargs)
+        agent = MemAgent(model, embedding_model, retrieve_k, temperature_c5, enable_thinking=enable_thinking, batched_run=batched_run, vllm_kwargs=vllm_kwargs)
 
         memory_cache_file = os.path.join(memories_dir, f"memory_cache_sample_{sample_idx}.pkl")
         retriever_cache_file = os.path.join(memories_dir, f"retriever_cache_sample_{sample_idx}.pkl")
@@ -140,9 +140,9 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, output
                 for turn in turns.turns:
                     turn_datatime = turns.date_time
                     conversation_tmp = "Speaker " + turn.speaker + "says : " + turn.text
-                    conversation.append(conversation_tmp)
-                    timestamps.append(turn_datatime)
-                agent.add_memory(conversation, timestamps=timestamps)
+                    # conversation.append(conversation_tmp)
+                    # timestamps.append(turn_datatime)
+                    # agent.add_memory(conversation_tmp, timestamp=turn_datatime)
 
             memories_to_cache = agent.memory_system.memories
             with open(memory_cache_file, 'wb') as f:
@@ -240,6 +240,7 @@ def main():
                         help="Model to use")
     parser.add_argument('--embedding_model', type=str, default="Qwen/Qwen3-Embedding-4B",
                         help="Embedding model to use")
+    parser.add_argument('--batched_run', action='store_true', default=False)
     parser.add_argument('--enable_thinking', action='store_true', default=False)
     parser.add_argument("--output", type=str, default=None,
                         help="Path to save evaluation results")
@@ -251,11 +252,13 @@ def main():
                         help="Number of memories to retrieve")
     args, vllm_kwargs = parser.parse_known_args()
 
+    print(args)
+
     if args.ratio <= 0.0 or args.ratio > 1.0:
         raise ValueError("Ratio must be between 0.0 and 1.0")
 
     dataset_path = os.path.join(os.path.dirname(__file__), args.dataset)
-    output_path = os.path.join(os.path.dirname(__file__), args.output) if args.output else None
+    output_path = args.output # os.path.join(os.path.dirname(__file__), args.output) if args.output else None
 
     if vllm_kwargs:
         vllm_kwargs = parse_vllm_kwargs(vllm_kwargs)
@@ -263,7 +266,7 @@ def main():
         vllm_kwargs = None
 
     evaluate_dataset(
-        dataset_path, args.model, args.embedding_model, output_path, args.ratio,
+        dataset_path, args.model, args.embedding_model, args.batched_run, output_path, args.ratio,
         args.temperature_c5, args.retrieve_k, args.enable_thinking, vllm_kwargs=vllm_kwargs
     )
 

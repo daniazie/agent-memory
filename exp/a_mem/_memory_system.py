@@ -109,24 +109,18 @@ class MemoryNote:
 
 class AgenticMemorySystem:
     def __init__(self,
-                 model_name: str | LLMController = 'all-MiniLM-L6-v2',
-                 llm: str | LLMControllerq = "Qwen/Qwen3-4B-Instruct-2507",
+                 model_name: str = 'all-MiniLM-L6-v2',
+                 llm: str = "Qwen/Qwen3-4B-Instruct-2507",
                  evo_threshold: int = 100,
-                 enable_thinking: bool = False,
                  **vllm_kwargs
                  ):
 
         self.memories: Dict[str, List[MemoryNote] | MemoryNote] = {}
         self.retriever = get_retriever(model_name)
-        if isinstance(llm, str):
-            self.llm_controller = LLMController(
-                llm,
-                enable_thinking=enable_thinking,
-                **vllm_kwargs
-            )
-        else:
-            self.llm_controller = llm
-
+        self.llm_controller = LLMController(
+            llm,
+            **vllm_kwargs
+        )
         self.evo_cnt = 0
         self.evo_threshold = evo_threshold
 
@@ -313,38 +307,32 @@ class BatchedAgenticMemorySystem:
 
     def __init__(self,
                  model_name: str = 'all-MiniLM-L6-v2',
-                 llm: str | LLMController = "Qwen/Qwen3-4B-Instruct-2507",
+                 llm: str = "Qwen/Qwen3-4B-Instruct-2507",
                  evo_threshold: int = 100,
-                 enable_thinking: bool = False,
                  **vllm_kwargs
                  ):
 
         self.memories: Dict[str, List[MemoryNote] | MemoryNote] = {}
         self.retriever = get_retriever(model_name)
-        if isinstance(llm, str):
-            self.llm_controller = LLMController(
-                llm,
-                enable_thinking=enable_thinking,
-                **vllm_kwargs
-            )
-        else:
-            self.llm_controller = llm
-
+        self.llm_controller = LLMController(
+            llm,
+            **vllm_kwargs
+        )
         self.evo_cnts = None
         self.evo_threshold = evo_threshold
 
     # ---- public API (mirrors AgenticMemorySystem) ----
 
-    def add_note(self, contents: List[str] | str, time: List[str] | str = None, **kwargs) -> str:
+    def add_note(self, contents: List[str] | str, timestamps: List[str] | str = None, **kwargs) -> str:
         """Add a new memory note."""
         notes = []
         if isinstance(contents, str):
             contents = [contents]
-            time = [time]
+            timestamps = [timestamps]
 
         if self.evo_cnts is None:
             self.evo_cnts = [0] * len(contents)
-        for content, timestamp in zip(contents, time):
+        for content, timestamp in zip(contents, timestamps):
             note = MemoryNote(
             content=content,
             llm_controller=self.llm_controller,

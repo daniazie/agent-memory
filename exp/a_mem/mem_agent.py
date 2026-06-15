@@ -1,7 +1,7 @@
 import random
 import logging
 
-from memory_system import AgenticMemorySystem
+from memory_system import AgenticMemorySystem, BatchedAgenticMemorySystem
 from llm_controller import LLMController
 from llm_text_parsers import (
     parse_relevant_parts,
@@ -14,22 +14,24 @@ class MemAgent:
     """Agent using the robust memory system with plain-text LLM calls."""
 
     def __init__(self, agent_model, embedding_model, retrieve_k, temperature_c5,
-                 enable_thinking: bool, **vllm_kwargs):
-        self.memory_system = AgenticMemorySystem(
-            model_name=embedding_model,
-            llm=agent_model,
+                 enable_thinking: bool, batched_run: bool = False, **vllm_kwargs):
+        memory_system = BatchedAgenticMemorySystem if batched_run else AgenticMemorySystem
+        self.retriever_llm = LLMController(
+            model_name=agent_model,
             enable_thinking=enable_thinking,
             **vllm_kwargs
         )
-        self.retriever_llm = LLMController(
-            model_name=agent_model,
-            **vllm_kwargs
+
+        self.memory_system = memory_system(
+            model_name=embedding_model,
+            llm=self.retriever_llm
         )
+        
         self.retrieve_k = retrieve_k
         self.temperature_c5 = temperature_c5
 
-    def add_memory(self, contents, timestamps=None):
-        self.memory_system.add_note(contents, timestamps=timestamps)
+    def add_memory(self, content, timestamp=None):
+        self.memory_system.add_note(content, time=timestamp)
 
     def retrieve_memory(self, content, k=10):
         return self.memory_system.find_related_memories_raw(content, k=k)

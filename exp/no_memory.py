@@ -1,5 +1,4 @@
 from vllm import LLM, SamplingParams
-from vllm.sampling_params import StructuredOutputsParams
 from vllm.config import ReasoningConfig
 from transformers import AutoTokenizer
 
@@ -10,7 +9,7 @@ import argparse
 import json
 import os
 
-from data_utils import load_dataset, prepare_dataset
+from data_utils import load_dataset
 from a_mem.utils import calculate_metrics, aggregate_metrics
 
 class Answer(BaseModel):
@@ -20,7 +19,7 @@ class Answer(BaseModel):
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default="Qwen/Qwen3-4B-Instruct-2507")
-    parser.add_argument('--data_path', type=str, default='A-mem/data/locomo10.json')
+    parser.add_argument('--data_path', type=str, default='data/locomo10.json')
     parser.add_argument('--enable_thinking', action='store_true', default=False)
     parser.add_argument('--thinking_token_budget', type=int, default=0)
     parser.add_argument('--enable_thinking_budget', action='store_true', default=False)
@@ -129,16 +128,21 @@ def main(args: argparse.Namespace):
     final_results['per_sample_scores'] = per_sample_scores
     
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs('preds', exist_ok=True)
     model_name = args.model.split('/')[-1].lower()
     if args.enable_thinking:
         if not 'think' in model_name.lower() or not 'reason' in model_name.lower():
             model_name = f"{model_name}-reasoning"
         if args.enable_thinking_budget:
             model_name = f"{model_name}_budgeted"
+    if args.use_mcq:
+        model_name = f"{model_name}_mcq"
     
     result_file = f"{model_name}_no-memory_results.json"
-    with open(f"{args.output_dir}/{result_file}", "w", encoding="utf-8") as file:
+    with open(f"preds/{result_file}", "w", encoding="utf-8") as file:
         json.dump(results, file, indent=2)
+    with open(f"{args.output_dir}/{result_file}", "w", encoding="utf-8") as file:
+        json.dump(final_results, file, indent=2)
 
 if __name__ == "__main__":
     parser = init_parser()
