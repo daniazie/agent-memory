@@ -183,6 +183,7 @@ class AgenticMemorySystem:
 
         indices = self.retriever.search(query, k)
         all_memories = list(self.memories.values())
+        print(len(all_memories), indices)
         memory_str = ""
         for i in indices:
             memory_str += (
@@ -616,6 +617,7 @@ class BatchedAgenticMemorySystem:
     def reset(self):
         self.memories: Dict[str, List[MemoryNote] | MemoryNote] = {}
         self.evo_cnts = []
+        self.retriever.reset()
 
 def run_tests():
     """Run system tests"""

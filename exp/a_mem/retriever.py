@@ -142,7 +142,7 @@ class HybridRetriever:
             
         return True
         
-    def retrieve(self, query: str, k: int = 5) -> List[int]:
+    def search(self, query: str, k: int = 5) -> List[int]:
         """Retrieve documents using hybrid scoring"""
         if not self.corpus:
             return []
@@ -201,7 +201,7 @@ class SimpleEmbeddingRetriever:
             for idx, doc in enumerate(documents):
                 self.document_ids[doc] = start_idx + idx
     
-    def search(self, query: str, k: int = 5) -> List[Dict[str, float]]:
+    def search(self, query: str, k: int = 5) -> List[int]:
         """Search for similar documents using cosine similarity.
         
         Args:
@@ -263,6 +263,11 @@ class SimpleEmbeddingRetriever:
             print(f"Corpus file not found: {retriever_cache_file}")
             
         return self
+    
+    def reset(self):
+        self.corpus = []
+        self.embeddings = None
+        self.document_ids = {}
 
     @classmethod
     def load_from_local_memory(cls, memories: Dict, model_name: str) -> 'SimpleEmbeddingRetriever':
@@ -278,7 +283,6 @@ class SimpleEmbeddingRetriever:
         retriever = cls(model_name)
         retriever.add_documents(all_docs)
         return retriever
-    
 
 def get_retriever(model_name: str = 'all-MiniLM-L6-v2', alpha: float = 0.5, retriever_type: Literal['simple_embed', 'hybrid'] = 'simple_embed'):
     if retriever_type == 'simple_embed':

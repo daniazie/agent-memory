@@ -154,7 +154,6 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batche
             eval_logger.info(f"Successfully loaded {len(cached_memories)} memories")
         else:
             eval_logger.info(f"No cached memories found for sample {sample_idx}. Creating new memories.")
-
             
             for _, turns in sample.conversation.sessions.items():
                 conversation = []
