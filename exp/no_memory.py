@@ -4,13 +4,14 @@ from transformers import AutoTokenizer
 
 from ast import literal_eval
 from pydantic import BaseModel
+from sentence_transformers import SentenceTransformer
 from functools import partial
 import argparse
 import json
 import os
 
 from data_utils import load_dataset
-from a_mem.utils import calculate_metrics, aggregate_metrics
+from a_mem.eval_utils import calculate_metrics, aggregate_metrics
 
 class Answer(BaseModel):
     answer: str
@@ -19,13 +20,16 @@ class Answer(BaseModel):
 def init_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default="Qwen/Qwen3-4B-Instruct-2507")
+    parser.add_argument('--embedding_model', type=str, default='sentence-transformers/all-MiniLM-L6-v2')
     parser.add_argument('--data_path', type=str, default='data/locomo10.json')
     parser.add_argument('--enable_thinking', action='store_true', default=False)
     parser.add_argument('--thinking_token_budget', type=int, default=0)
     parser.add_argument('--enable_thinking_budget', action='store_true', default=False)
     parser.add_argument('--use_mcq', action='store_true', default=False)
+    parser.add_argument('--format_amem', action='store_true', default=False)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--max_tokens', type=int, default=32)
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--output_dir', type=str, default='results')
     return parser
 
@@ -35,6 +39,7 @@ def load_model(args):
         dtype="bfloat16",
         quantization="bitsandbytes",
         max_num_seqs=args.batch_size,
+        seed=args.seed,
     )
 
     if args.enable_thinking:
@@ -43,6 +48,18 @@ def load_model(args):
         **init_kwargs
     )
 
+    return model
+
+def load_embedding_model(args):
+    try:
+        model = LLM(
+            args.embedding_model,
+            runner='pooling'
+        )
+    except Exception as e:
+        model = SentenceTransformer(args.embedding_model)
+    except Exception as e:
+        model = None
     return model
 
 def decode_thinking(model: LLM, outputs_ids: list):
@@ -68,7 +85,7 @@ def decode_thinking(model: LLM, outputs_ids: list):
     return preds
 
 def main(args: argparse.Namespace):
-    dataset = load_dataset(args.data_path, args.use_mcq)
+    dataset = load_dataset(args.data_path, args.use_mcq, args.format_amem)
     model = load_model(args)
 
     sampling_params = model.get_default_sampling_params()
@@ -88,22 +105,19 @@ def main(args: argparse.Namespace):
         preds = [output.outputs[0].text for output in outputs]
 
     results = []
-    metrics = []
     categories = []
     final_results = {
         "model": args.model.split('/')[-1],
         "dataset": args.data_path,
         "total_questions": dataset.num_rows,
     }
-    per_sample_scores = []
+
     for pred, item in zip(preds, dataset):
         result = {
             k: v
             for k, v in item.items()
             if not k == 'prompt'
         }
-        scores = calculate_metrics(pred, item['reference'])
-        metrics.append(scores)
         categories.append(item['category'])
         if args.enable_thinking:
             result['prediction'] = pred['answer']
@@ -112,17 +126,26 @@ def main(args: argparse.Namespace):
             result['prediction'] = pred
         results.append(result)
 
-        per_sample_scores.append({
-            "category": item['category'],
-            "question": item['question'],
-            "answer": item['answer'],
-            "reference": item['reference'],
-            "evidence": item['dialogue'],
-            "prediction": result.get("prediction"),
-            "scores": scores
-        })
 
+    prediction = [result['prediction'] for result in results]
+    reference = [result['reference'] for result in results]
+
+    del model
+    embedding_model = load_embedding_model(args)
+
+    metrics = calculate_metrics(prediction=prediction, reference=reference, sentence_model=embedding_model)
     aggregated = aggregate_metrics(metrics, categories)
+
+    per_sample_scores = [
+        {
+            k: v
+            for k, v in result.items()
+            if not k == 'reasoning'
+        } for result in results
+    ]
+
+    for i, sample in enumerate(per_sample_scores):
+        sample['scores'] = metrics[i]
 
     final_results['aggregated_scores'] = aggregated
     final_results['per_sample_scores'] = per_sample_scores

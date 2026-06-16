@@ -6,7 +6,7 @@ Usage:
     python test_advanced_robust.py --backend openai --model gpt-4o-mini --dataset data/locomo10.json
     python test_advanced_robust.py --backend ollama --model qwen2.5:3b --dataset data/locomo10.json
 """
-
+from vllm import LLM
 from memory_system import AgenticMemorySystem
 from mem_agent import MemAgent
 from llm_controller import LLMController
@@ -25,12 +25,15 @@ import nltk
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.util import pytorch_cos_sim
 import statistics
+import torch
 from collections import defaultdict
 import pickle
 import random
 from tqdm import tqdm
-from utils import calculate_metrics, aggregate_metrics, parse_vllm_kwargs
+from config_utils import parse_vllm_kwargs
 from datetime import datetime
+import time
+import gc
 
 # Download required NLTK data
 try:
@@ -41,13 +44,25 @@ except LookupError:
     nltk.download('wordnet')
 
 # Initialize SentenceTransformer model (this will be reused)
-try:
-    sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-except Exception as e:
-    print(f"Warning: Could not load SentenceTransformer model: {e}")
-    sentence_model = None
+def load_embedding_model(embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    try:
+        model = LLM(
+            embedding_model,
+            runner='pooling'
+        )
+    except Exception as e:
+        model = SentenceTransformer(embedding_model)
+    except Exception as e:
+        model = None
+    return model
 
 logger = logging.getLogger("amem")
+
+def flush():
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    return gc.collect()
+
 
 def setup_logger(log_file: Optional[str] = None) -> logging.Logger:
     """Set up logging configuration."""
@@ -66,12 +81,18 @@ def setup_logger(log_file: Optional[str] = None) -> logging.Logger:
 
     return eval_logger
 
-
 def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batched_run: bool, output_path: Optional[str] = None,
                      ratio: float = 1.0,
                      temperature_c5: float = 0.5, retrieve_k: int = 10,
-                     enable_thinking: bool = False, vllm_kwargs: dict | None = None):
+                     enable_thinking: bool = False, use_mcq: bool = False, vllm_kwargs: dict | None = None):
     """Evaluate the robust agent on the LoComo dataset."""
+    if batched_run:
+        from eval_utils import calculate_metrics, aggregate_metrics
+    else:
+        from utils import calculate_metrics, aggregate_metrics
+
+    assert Path(('/').join(output_path.split('/')[:-1])).exists() == True
+
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
     think_mode = "thinking" if enable_thinking else "no-think"
     log_filename = f"eval_robust_{model}_{think_mode}_ratio{ratio}_{timestamp}.log"
@@ -105,9 +126,10 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batche
     os.makedirs(memories_dir, exist_ok=True)
     allow_categories = [1, 2, 3, 4, 5]
 
+    predictions, references = [], []
+    agent = MemAgent(model, embedding_model, retrieve_k, temperature_c5, enable_thinking=enable_thinking, batched_run=batched_run, use_mcq=use_mcq, vllm_kwargs=vllm_kwargs)
     for sample_idx, sample in enumerate(samples):
-        agent = MemAgent(model, embedding_model, retrieve_k, temperature_c5, enable_thinking=enable_thinking, batched_run=batched_run, vllm_kwargs=vllm_kwargs)
-
+        agent.reset_memory() # usah bazir memori, nak
         memory_cache_file = os.path.join(memories_dir, f"memory_cache_sample_{sample_idx}.pkl")
         retriever_cache_file = os.path.join(memories_dir, f"retriever_cache_sample_{sample_idx}.pkl")
         retriever_cache_embeddings_file = os.path.join(
@@ -140,9 +162,13 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batche
                 for turn in turns.turns:
                     turn_datatime = turns.date_time
                     conversation_tmp = "Speaker " + turn.speaker + "says : " + turn.text
-                    # conversation.append(conversation_tmp)
-                    # timestamps.append(turn_datatime)
-                    # agent.add_memory(conversation_tmp, timestamp=turn_datatime)
+                    if batched_run:
+                        conversation.append(conversation_tmp)
+                        timestamps.append(turn_datatime)
+                    else:
+                        agent.add_memory(conversation_tmp, timestamp=turn_datatime)
+                if batched_run and len(conversation) > 0 and len(timestamps) > 0:
+                    agent.add_memory(conversation, timestamps)
 
             memories_to_cache = agent.memory_system.memories
             with open(memory_cache_file, 'wb') as f:
@@ -171,27 +197,44 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batche
                 eval_logger.info(f"Category: {qa.category}")
                 eval_logger.info(f"Raw Context: {raw_context}")
 
-                metrics = calculate_metrics(prediction, qa.final_answer) if qa.final_answer else {
-                    "exact_match": 0, "f1": 0.0, "rouge1_f": 0.0, "rouge2_f": 0.0,
-                    "rougeL_f": 0.0, "bleu1": 0.0, "bleu2": 0.0, "bleu3": 0.0,
-                    "bleu4": 0.0, "bert_f1": 0.0, "meteor": 0.0, "sbert_similarity": 0.0
-                }
-
-                all_metrics.append(metrics)
-                all_categories.append(qa.category)
-
+                final_answer = qa.final_answer if qa.category != 5 else "Not mentioned"
                 result = {
                     "sample_id": sample_idx,
                     "question": qa.question,
                     "prediction": prediction,
-                    "reference": qa.final_answer,
+                    "reference": final_answer,
                     "category": qa.category,
-                    "metrics": metrics,
                 }
+
+                if not batched_run:
+                    metrics = calculate_metrics(prediction, final_answer) if final_answer else {
+                        "exact_match": 0, "f1": 0.0, "rouge1_f": 0.0, "rouge2_f": 0.0,
+                        "rougeL_f": 0.0, "bleu1": 0.0, "bleu2": 0.0, "bleu3": 0.0,
+                        "bleu4": 0.0, "bert_f1": 0.0, "meteor": 0.0, "sbert_similarity": 0.0
+                    }
+
+                    all_metrics.append(metrics)
+                    all_categories.append(qa.category)
+                    result["metrics"] = metrics
+
                 results.append(result)
 
                 if total_questions % 10 == 0:
                     eval_logger.info(f"Processed {total_questions} questions")
+        if batched_run:
+            predictions += [result['prediction'] for result in results]
+            references += [result['reference'] for result in results]
+        
+        eval_logger.info(f"Running garbage collector: {flush()}")
+
+    if batched_run:
+        del agent
+        time.sleep(3)
+        sentence_model = load_embedding_model(embedding_model="sentence-transformers/all-MiniLM-L6-v2")
+        all_metrics = calculate_metrics(predictions, references, sentence_model=sentence_model)
+
+        for result, metrics in zip(results, all_metrics):
+            result['metrics'] = metrics
 
     aggregate_results = aggregate_metrics(all_metrics, all_categories)
 
@@ -208,7 +251,7 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batche
     }
     eval_logger.info(f"Error number: {error_num}")
 
-    if output_path:
+    if output_path is not None:
         with open(output_path, 'w') as f:
             json.dump(final_results, f, indent=2)
         eval_logger.info(f"Results saved to {output_path}")
@@ -250,6 +293,7 @@ def main():
                         help="Temperature for category 5 questions")
     parser.add_argument("--retrieve_k", type=int, default=10,
                         help="Number of memories to retrieve")
+    parser.add_argument("--use_mcq", action='store_true', default=False)
     args, vllm_kwargs = parser.parse_known_args()
 
     print(args)
@@ -257,7 +301,7 @@ def main():
     if args.ratio <= 0.0 or args.ratio > 1.0:
         raise ValueError("Ratio must be between 0.0 and 1.0")
 
-    dataset_path = os.path.join(os.path.dirname(__file__), args.dataset)
+    dataset_path = args.dataset # os.path.join(os.path.dirname(__file__), args.dataset)
     output_path = args.output # os.path.join(os.path.dirname(__file__), args.output) if args.output else None
 
     if vllm_kwargs:
@@ -267,7 +311,7 @@ def main():
 
     evaluate_dataset(
         dataset_path, args.model, args.embedding_model, args.batched_run, output_path, args.ratio,
-        args.temperature_c5, args.retrieve_k, args.enable_thinking, vllm_kwargs=vllm_kwargs
+        args.temperature_c5, args.retrieve_k, args.enable_thinking, args.use_mcq, vllm_kwargs=vllm_kwargs
     )
 
 

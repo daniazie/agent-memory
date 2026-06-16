@@ -109,7 +109,6 @@ def format_dataset(examples, use_mcq: bool = False):
     answers = []
     dialogue = []
     references = []
-    timestamps = []
     for qa in qas:
         category = qa['category']
         if category == 4:
@@ -161,11 +160,87 @@ def format_dataset(examples, use_mcq: bool = False):
 
     return dataset
 
-def load_dataset(data_path, use_mcq: bool = False):
+def format_sample_amem(category, context, question, answer, use_mcq: bool = False):
+    if category == 5 and use_mcq:
+        answer_tmp = list()
+        if random.random() < 0.5:
+            answer_tmp.append('Not mentioned in the conversation')
+            answer_tmp.append(answer)
+        else:
+            answer_tmp.append(answer)
+            answer_tmp.append('Not mentioned in the conversation')
+        user_prompt = f"""Based on the context: {context}, answer the following question. {question}
+
+Select the correct answer: {answer_tmp[0]} or {answer_tmp[1]}  Short answer:"""
+    elif category == 2:
+        user_prompt = f"""Based on the context: {context}, answer the following question. Use DATE of CONVERSATION to answer with an approximate date.
+Please generate the shortest possible answer, using words from the conversation where possible, and avoid using any subjects.
+
+Question: {question} Short answer:"""
+    elif category == 3:
+        user_prompt = f"""Based on the context: {context}, write an answer in the form of a short phrase for the following question. Answer with exact words from the context whenever possible.
+
+Question: {question} Short answer:"""
+    else:
+        user_prompt = f"""Based on the context: {context}, write an answer in the form of a short phrase for the following question. Answer with exact words from the context whenever possible.
+
+Question: {question} Short answer:"""
+    return user_prompt
+
+def format_dataset_amem(examples, use_mcq: bool = False):
+    SYS_PROMPT = "Follow the format specified in the prompt exactly. Do not add extra commentary."
+    examples = add_evidence(remove_session(examples))
+    qas = examples['qa']
+    categories = []
+    conversation = examples['conversation']
+
+    questions = []
+    prompts = []
+    answers = []
+    dialogue = []
+    references = []
+
+    for qa in qas:
+        category = qa['category']
+        if category == 4:
+            context = format_single_hop(qa['evidence'], conversation)
+        else:
+            context = format_multihop(conversation)
+        question = qa['question']
+        dialogue.append(qa['dialogue'])
+        questions.append(question)
+        answer = qa.get('answer') or qa.get('adversarial_answer')
+        answer = str(answer)
+        reference = str(qa.get('answer')) or "Not mentioned"
+        query = format_sample_amem(category, context, question, answer, use_mcq=use_mcq)
+        prompt = [
+            {"role": "system", "content": SYS_PROMPT},
+            {"role": "user", "content": query}
+        ]
+
+        prompts.append(prompt)
+        answers.append(answer)
+        references.append(reference)
+        categories.append(category)
+
+    return {
+        'question': questions,
+        "prompt": prompts,
+        "reference": references,
+        'answer': answers,
+        'dialogue': dialogue,
+        'category': categories
+    }
+
+
+def load_dataset(data_path, use_mcq: bool = False, format_amem: bool = False):
     data = json.load(open(data_path, "r"))
     datasets = []
     for sample in data:
-        dataset = Dataset.from_dict(format_dataset(sample, use_mcq=use_mcq), on_mixed_types='use_json')
+        if format_amem:
+            dataset = Dataset.from_dict(format_dataset_amem(sample, use_mcq=use_mcq), on_mixed_types='use_json')
+        else: 
+            dataset = Dataset.from_dict(format_dataset(sample, use_mcq=use_mcq), on_mixed_types='use_json')
         datasets.append(dataset)
 
     dataset: Dataset = concatenate_datasets(datasets)

@@ -330,10 +330,8 @@ class BatchedAgenticMemorySystem:
         else:
             self.llm_controller = llm
 
-        self.evo_cnts = None
+        self.evo_cnts = []
         self.evo_threshold = evo_threshold
-
-    # ---- public API (mirrors AgenticMemorySystem) ----
 
     def add_note(self, contents: List[str] | str, time: List[str] | str = None, **kwargs) -> str:
         """Add a new memory note."""
@@ -342,8 +340,6 @@ class BatchedAgenticMemorySystem:
             contents = [contents]
             time = [time]
 
-        if self.evo_cnts is None:
-            self.evo_cnts = [0] * len(contents)
         for content, timestamp in zip(contents, time):
             note = MemoryNote(
             content=content,
@@ -354,8 +350,13 @@ class BatchedAgenticMemorySystem:
             notes.append(note)
         
         outputs = self.process_memories(notes)
+        assert len(notes) == len(outputs), "len(notes) != len(outputs): {}, {}".format(len(notes), len(outputs))
+
+        # assert len(self.evo_cnts) == len(outputs), "len(self.evo_cnts) != len(outputs): {}, {}".format(len(self.evo_cnts), len(outputs))
         note_ids = []
         for i, output in enumerate(outputs):
+            if len(self.evo_cnts) < (i+1):
+                self.evo_cnts.append(0)
             evo_label, notes[i] = output
             self.memories[notes[i].id] = notes[i]
             self.retriever.add_documents([
@@ -366,7 +367,7 @@ class BatchedAgenticMemorySystem:
             ])
             if evo_label:
                 self.evo_cnts[i] += 1
-                if self.evo_cnt[i] % self.evo_threshold == 0:
+                if self.evo_cnts[i] % self.evo_threshold == 0:
                     self.consolidate_memories()
             note_ids.append(notes[i].id)
         return note_ids
@@ -491,9 +492,9 @@ class BatchedAgenticMemorySystem:
             self.memories[notes_id[memorytmp_idx]] = notetmp
         return True
 
-    def try_except(self, function: Callable, note: str, **kwargs):
+    def try_except(self, function: Callable, note: str, fn_kwargs: Dict[str, Any]):
         try:
-            return function(**kwargs)
+            return function(**fn_kwargs)
         except Exception as e:
             logger.error("Evolution failed for note %s: %s — storing without evolution", note.id, e)
             return
@@ -529,7 +530,7 @@ class BatchedAgenticMemorySystem:
                     keywords=note.keywords,
                     nearest_neighbors_memories=neighbor_memory,
                 )
-                decision_prompt = self.try_except(self.format_prompt, note, **fn_kwargs)
+                decision_prompt = self.try_except(self.format_prompt, note, fn_kwargs)
                 if decision_prompt is not None:
                     decision_prompts.append((i, decision_prompt))
                 else:
@@ -544,13 +545,13 @@ class BatchedAgenticMemorySystem:
                 'idx': idx, 
                 'decision_response': decision_response
             }
-            output = self.try_except(self.process_decision, notes[idx], **fn_kwargs)
+            output = self.try_except(self.process_decision, notes[idx], fn_kwargs)
             if output is not None:
                 should_strengthen, should_update = output
-                if not should_strengthen and not should_update:
-                    outputs[idx] = (False, notes[idx])
-                else:
+                if should_strengthen or should_update:
                     notes_to_process.append((idx, notes[idx], neighbor_memories[idx], should_strengthen, should_update))
+                else:
+                    outputs[idx] = (False, notes[idx])
             else:
                 outputs[idx] = (False, notes[idx])
 
@@ -564,9 +565,9 @@ class BatchedAgenticMemorySystem:
                         keywords=note[1].keywords,
                         nearest_neighbors_memories=note[2],
                     )
-                strengthen_prompt = self.try_except(self.format_prompt, note[1], **fn_kwargs)
+                strengthen_prompt = self.try_except(self.format_prompt, note[1], fn_kwargs)
                 if strengthen_prompt is not None:
-                    strengthen_prompts.append(strengthen_prompt)
+                    strengthen_prompts.append((note[0], strengthen_prompt))
                 else:
                     outputs[note[0]] = (False, note[1])
 
@@ -596,9 +597,9 @@ class BatchedAgenticMemorySystem:
                     neighbor_count=len(indices),
                 )
 
-                update_prompt = self.try_except(self.format_prompt, note[1], **fn_kwargs)
+                update_prompt = self.try_except(self.format_prompt, note[1], fn_kwargs)
                 if update_prompt is not None:
-                    update_prompts.append(update_prompt)
+                    update_prompts.append((note[0], update_prompt))
                 else:
                     outputs[note[0]] = (False, note[1])
         
@@ -607,11 +608,14 @@ class BatchedAgenticMemorySystem:
             idx = response[0]
             update_response = response[1]
             fn_kwargs = dict(indices=idxs[idx], update_response=update_response)
-            output = self.try_except(self.process_update, notes[idx], **fn_kwargs)
+            output = self.try_except(self.process_update, notes[idx], fn_kwargs)
             if output is not None:
                 outputs[idx] = (True, notes[idx])
-        
         return outputs
+    
+    def reset(self):
+        self.memories: Dict[str, List[MemoryNote] | MemoryNote] = {}
+        self.evo_cnts = []
 
 def run_tests():
     """Run system tests"""

@@ -29,16 +29,10 @@ class LLMController:
             think_ids.append(output_ids[:index])
             answer_ids.append(output_ids[index:])
         
-        reasoning_outputs = tokenizer.decode(think_ids, skip_special_tokens=True)
+        # reasoning_outputs = tokenizer.decode(think_ids, skip_special_tokens=True)
         answers = tokenizer.decode(answer_ids, skip_special_tokens=True)
         
-        preds = []
-        for reasoning, answer in zip(reasoning_outputs, answers):
-            pred = {
-                "reasoning": reasoning,
-                "answer": answer.strip()
-            }
-            preds.append(pred)
+        preds = [answer.strip() for answer in answers]
         return preds
     
     def decode(self, output_ids):
@@ -51,14 +45,10 @@ class LLMController:
         think_ids = output_ids[:index]
         answer_ids = output_ids[index:]
         
-        reasoning_output = tokenizer.decode(think_ids, skip_special_tokens=True)
+        # reasoning_output = tokenizer.decode(think_ids, skip_special_tokens=True)
         answer = tokenizer.decode(answer_ids, skip_special_tokens=True)[0]
         
-        pred = {
-            "reasoning": reasoning_output,
-            "answer": answer.strip()
-        }
-        return pred
+        return answer.strip()
     
     def format_messages(self, prompts):
         messages = []

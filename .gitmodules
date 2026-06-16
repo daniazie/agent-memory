@@ -1,0 +1,3 @@
+[submodule "MemoryBench"]
+	path = MemoryBench
+	url = https://github.com/THUIR/MemoryBench.git

@@ -14,7 +14,7 @@ class MemAgent:
     """Agent using the robust memory system with plain-text LLM calls."""
 
     def __init__(self, agent_model, embedding_model, retrieve_k, temperature_c5,
-                 enable_thinking: bool, batched_run: bool = False, **vllm_kwargs):
+                 enable_thinking: bool, batched_run: bool = False, use_mcq: bool = True, **vllm_kwargs):
         memory_system = BatchedAgenticMemorySystem if batched_run else AgenticMemorySystem
         self.retriever_llm = LLMController(
             model_name=agent_model,
@@ -27,6 +27,7 @@ class MemAgent:
             llm=self.retriever_llm
         )
         
+        self.use_mcq = use_mcq
         self.retrieve_k = retrieve_k
         self.temperature_c5 = temperature_c5
 
@@ -72,7 +73,7 @@ Keywords:"""
 
         assert category in [1, 2, 3, 4, 5]
 
-        if category == 5:
+        if category == 5 and self.use_mcq:
             answer_tmp = list()
             if random.random() < 0.5:
                 answer_tmp.append('Not mentioned in the conversation')
@@ -110,3 +111,6 @@ Question: {question} Short answer:"""
             logger.warning("answer_question failed: %s — returning empty", e)
             response = ""
         return response, user_prompt, raw_context
+    
+    def reset_memory(self):
+        self.memory_system.reset()
