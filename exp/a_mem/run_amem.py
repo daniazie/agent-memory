@@ -213,9 +213,9 @@ def evaluate_dataset(dataset_path: str, model: str, embedding_model: str, batche
                     }
 
                     all_metrics.append(metrics)
-                    all_categories.append(qa.category)
                     result["metrics"] = metrics
 
+                all_categories.append(qa.category)
                 results.append(result)
 
                 if total_questions % 10 == 0:
