@@ -1,3 +1,6 @@
 [submodule "MemoryBench"]
 	path = MemoryBench
 	url = https://github.com/THUIR/MemoryBench.git
+[submodule "A-mem"]
+	path = A-mem
+	url = https://github.com/WujiangXu/A-mem.git
